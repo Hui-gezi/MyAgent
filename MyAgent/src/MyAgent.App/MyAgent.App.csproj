@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyAgent.Core\MyAgent.Core.csproj" />
+    <ProjectReference Include="..\MyAgent.Llm\MyAgent.Llm.csproj" />
+    <ProjectReference Include="..\MyAgent.Session\MyAgent.Session.csproj" />
+    <ProjectReference Include="..\MyAgent.Fs\MyAgent.Fs.csproj" />
+    <ProjectReference Include="..\MyAgent.Shell\MyAgent.Shell.csproj" />
+    <ProjectReference Include="..\MyAgent.Todo\MyAgent.Todo.csproj" />
+    <ProjectReference Include="..\MyAgent.Context\MyAgent.Context.csproj" />
+    <ProjectReference Include="..\MyAgent.Compaction\MyAgent.Compaction.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

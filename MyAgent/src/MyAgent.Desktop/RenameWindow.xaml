@@ -1,0 +1,50 @@
+<Window x:Class="MyAgent.Desktop.RenameWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="重命名会话" Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" WindowStyle="None"
+        AllowsTransparency="True" Background="Transparent"
+        FontFamily="{StaticResource TextFont}" FontSize="14"
+        TextElement.Foreground="{DynamicResource TextPrimary}"
+        ShowInTaskbar="False" ResizeMode="NoResize">
+    <Border CornerRadius="28" Background="{DynamicResource MenuSurface}"
+            BorderBrush="{DynamicResource BorderL2}" BorderThickness="1" Margin="16">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="48" ShadowDepth="16" Opacity="0.18" Color="#0F1115" />
+        </Border.Effect>
+        <StackPanel>
+            <DockPanel Margin="24,18,24,12">
+                <Button DockPanel.Dock="Right" Content="✕" FontSize="14"
+                        Foreground="{DynamicResource TextSecondary}" Background="Transparent"
+                        BorderThickness="0" Cursor="Hand" Click="Cancel_Click" />
+                <TextBlock Text="重命名会话" FontSize="16" FontWeight="SemiBold" />
+            </DockPanel>
+            <TextBox x:Name="TitleBox" Margin="24,0,24,8" FontSize="13" Padding="10,8" KeyDown="TitleBox_KeyDown" />
+            <DockPanel Margin="24,12,24,18" LastChildFill="False">
+                <Button DockPanel.Dock="Right" Content="保存" Padding="18,8" Margin="8,0,0,0" Click="Save_Click" Cursor="Hand">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{DynamicResource BrandPrimary}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" />
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <Button.Foreground>
+                        <DynamicResource ResourceKey="BrandPrimaryText" />
+                    </Button.Foreground>
+                </Button>
+                <Button DockPanel.Dock="Right" Content="取消" Padding="18,8" Click="Cancel_Click" Cursor="Hand"
+                        Foreground="{DynamicResource TextPrimary}">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{DynamicResource BgLayer1}" BorderBrush="{DynamicResource BorderL2}"
+                                    BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" />
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </DockPanel>
+        </StackPanel>
+    </Border>
+</Window>

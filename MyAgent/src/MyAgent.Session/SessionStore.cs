@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using MyAgent.Core;
 
@@ -19,20 +19,39 @@ public sealed class SessionStore
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
 
+    /// <summary>配置锚点（settings.json / workspaces.json 所在目录）。
+    /// 默认永远是 ~/.myagent，不随 MYAGENT_HOME 或数据目录设置移动——
+    /// "数据目录在哪"这个配置本身必须住在固定位置，否则鸡生蛋。</summary>
     public string Home { get; }
+
+    /// <summary>数据目录（sessions/、schedules.json、logs/ 所在目录）。
+    /// 优先级：显式传入 > MYAGENT_HOME 环境变量 > 配置锚点。
+    /// 桌面端启动时把 settings.json 里的 dataHome 解析后经参数传入。</summary>
+    public string DataHome { get; }
+
     public string Root { get; }
 
-    public SessionStore(string? home = null)
+    /// <summary>默认配置锚点 ~/.myagent（含旧版 .dsh 目录的一次性迁移）。</summary>
+    public static string DefaultHome
     {
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var newHome = Path.Combine(profile, ".myagent");
-        var oldHome = Path.Combine(profile, ".dsh");
-        if (!Directory.Exists(newHome) && Directory.Exists(oldHome))
-            Directory.Move(oldHome, newHome);
-        Home = home
+        get
+        {
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var newHome = Path.Combine(profile, ".myagent");
+            var oldHome = Path.Combine(profile, ".dsh");
+            if (!Directory.Exists(newHome) && Directory.Exists(oldHome))
+                Directory.Move(oldHome, newHome);
+            return newHome;
+        }
+    }
+
+    public SessionStore(string? home = null, string? dataHome = null)
+    {
+        Home = home ?? DefaultHome;
+        DataHome = dataHome
             ?? Environment.GetEnvironmentVariable("MYAGENT_HOME")
-            ?? newHome;
-        Root = Path.Combine(Home, "sessions");
+            ?? Home;
+        Root = Path.Combine(DataHome, "sessions");
         Directory.CreateDirectory(Root);
     }
 
@@ -153,6 +172,7 @@ public sealed class SessionStore
                 if (root.TryGetProperty("time", out var time)) updatedAt = time.GetDateTimeOffset();
                 if (type == SessionEventTypes.UserMessage && title is null &&
                     root.TryGetProperty("data", out var userData) &&
+                    !(userData.TryGetProperty("source", out var src) && Core.Session.IsNoticeSource(src.GetString())) &&
                     userData.TryGetProperty("text", out var text))
                 {
                     var first = text.GetString() ?? "";

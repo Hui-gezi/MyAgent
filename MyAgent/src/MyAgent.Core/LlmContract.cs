@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace MyAgent.Core;
 
@@ -24,11 +24,17 @@ public sealed record SignatureDelta(string Signature) : StreamChunk;
 
 public sealed record ToolCallDelta(int Index, string? Id, string? Name, string? PartialJson) : StreamChunk;
 
-public sealed record UsageChunk(int PromptTokens, int CompletionTokens) : StreamChunk;
+/// <summary>
+/// Provider usage report. PromptTokens is the TOTAL billed input (uncached + cache-read +
+/// cache-write), mirroring the harness token-meter's three disjoint prompt-side buckets.
+/// Providers send partial reports (Anthropic: input at message_start, output at
+/// message_delta); the accumulator keeps the latest nonzero value per bucket.
+/// </summary>
+public sealed record UsageChunk(int PromptTokens, int CompletionTokens, int CacheReadTokens = 0, int CacheWriteTokens = 0) : StreamChunk;
 
 public sealed record FinishChunk(string StopReason) : StreamChunk;
 
-public sealed record AssistantOutcome(List<ContentBlock> Blocks, string StopReason, TokenUsageInfo? Usage);
+public sealed record AssistantOutcome(List<ContentBlock> Blocks, string StopReason, TokenUsageInfo? Usage, AssistantTimingInfo? Timing = null);
 
 public interface ILlmProvider
 {
@@ -49,7 +55,13 @@ public static class LlmAccumulator
         string? thinkingSignature = null;
         var toolCalls = new SortedDictionary<int, (string? Id, string? Name, System.Text.StringBuilder Json)>();
         var stopReason = "stop";
-        int promptTokens = 0, completionTokens = 0;
+        int promptTokens = 0, completionTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0;
+        // Latency facts (mirrors assistant-node timing): collection start ≈ step start;
+        // the first content delta marks TTFT; the remainder is decode wall time.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        long? firstDeltaMs = null;
+
+        void MarkDelta() => firstDeltaMs ??= clock.ElapsedMilliseconds;
 
         void FlushText()
         {
@@ -76,10 +88,12 @@ public static class LlmAccumulator
             switch (chunk)
             {
                 case TextDelta t:
+                    MarkDelta();
                     FlushThinking();
                     text.Append(t.Text);
                     break;
                 case ReasoningDelta r:
+                    MarkDelta();
                     FlushText();
                     thinking.Append(r.Text);
                     break;
@@ -87,6 +101,7 @@ public static class LlmAccumulator
                     thinkingSignature = s.Signature;
                     break;
                 case ToolCallDelta tc:
+                    MarkDelta();
                     FlushText();
                     FlushThinking();
                     if (!toolCalls.TryGetValue(tc.Index, out var call))
@@ -103,8 +118,12 @@ public static class LlmAccumulator
                     toolCalls[tc.Index] = updated;
                     break;
                 case UsageChunk u:
-                    promptTokens = u.PromptTokens;
-                    completionTokens = u.CompletionTokens;
+                    // Partial reports: keep the latest nonzero value per bucket (Anthropic
+                    // sends input at message_start and output at message_delta).
+                    if (u.PromptTokens > 0) promptTokens = u.PromptTokens;
+                    if (u.CompletionTokens > 0) completionTokens = u.CompletionTokens;
+                    if (u.CacheReadTokens > 0) cacheReadTokens = u.CacheReadTokens;
+                    if (u.CacheWriteTokens > 0) cacheWriteTokens = u.CacheWriteTokens;
                     break;
                 case FinishChunk f:
                     stopReason = f.StopReason;
@@ -131,9 +150,14 @@ public static class LlmAccumulator
             blocks.Add(new ToolUseBlock(id ?? $"call_{Guid.NewGuid():N}", name ?? "", input));
         }
 
-        var usage = promptTokens + completionTokens > 0
-            ? new TokenUsageInfo(promptTokens, completionTokens, promptTokens + completionTokens)
+        var usage = promptTokens + completionTokens + cacheReadTokens + cacheWriteTokens > 0
+            ? new TokenUsageInfo(promptTokens, completionTokens, promptTokens + completionTokens,
+                cacheReadTokens, cacheWriteTokens)
             : null;
-        return new AssistantOutcome(blocks, stopReason, usage);
+        var elapsed = clock.ElapsedMilliseconds;
+        var timing = firstDeltaMs is { } first
+            ? new AssistantTimingInfo((int)first, (int)Math.Max(0, elapsed - first))
+            : null;
+        return new AssistantOutcome(blocks, stopReason, usage, timing);
     }
 }

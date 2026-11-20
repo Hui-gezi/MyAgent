@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -6,7 +6,11 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using MyAgent.App;
+using MyAgent.Approval;
 using MyAgent.Core;
+using MyAgent.Jobs;
+using MyAgent.Permissions;
+using MyAgent.Sandbox;
 using MyAgent.Sessions;
 
 namespace MyAgent.Desktop;
@@ -36,6 +40,12 @@ public sealed class UserItem : ChatItem
 }
 
 public sealed class CompactionItem : ChatItem;
+
+/// <summary>A durable-looking error notice inside the transcript (agent/compaction failures).</summary>
+public sealed class ErrorItem : ChatItem
+{
+    public required string Text { get; init; }
+}
 
 public sealed class ProcessGroupItem : ChatItem
 {
@@ -252,6 +262,85 @@ public sealed class TodoVm
     public string State => Status switch { "completed" => "done", "in_progress" => "ongoing", _ => "" };
 }
 
+/* ===== feature panels (goal / plan / team / workflow / schedule) ===== */
+public sealed class GoalPanelVm : ViewModelBase
+{
+    private string _objective = "尚未设定目标";
+    private string _phase = "";
+    private string _progress = "";
+    private bool _hasGoal;
+    public bool HasGoal { get => _hasGoal; set => Set(ref _hasGoal, value); }
+    public string Objective { get => _objective; set => Set(ref _objective, value); }
+    public string Phase { get => _phase; set => Set(ref _phase, value); }
+    public string Progress { get => _progress; set => Set(ref _progress, value); }
+}
+
+public sealed class TeamTaskRowVm : ViewModelBase
+{
+    public required string Id { get; init; }
+    public required string Subject { get; init; }
+    public required string Status { get; init; }
+    public bool Ready { get; init; }
+    public string Owner { get; init; } = "";
+    public string StatusLabel => Status switch
+    {
+        "in_progress" => "进行中",
+        "completed" => "已完成",
+        _ => "待办",
+    };
+}
+
+public sealed class ScheduleRowVm : ViewModelBase
+{
+    public required string Id { get; init; }
+    public required string Title { get; init; }
+    public required string Kind { get; init; }
+    public required string Next { get; init; }
+    public required string Status { get; init; }
+}
+
+public sealed class WorkflowRowVm : ViewModelBase
+{
+    public required string RunId { get; init; }
+    public required string Name { get; init; }
+    public required string StopReason { get; init; }
+    public required int AgentsStarted { get; init; }
+    public required List<string> Phases { get; init; }
+    public required int AgentCount { get; init; }
+}
+
+public sealed class JobRowVm : ViewModelBase
+{
+    public required string Id { get; init; }
+    public required string Label { get; init; }
+    public required string Status { get; init; }
+    public required long OutputBytes { get; init; }
+    public string StatusLabel => Status switch
+    {
+        "running" => "运行中",
+        "stopping" => "停止中",
+        "completed" => "已完成",
+        "killed" => "已终止",
+        _ => "失败",
+    };
+}
+
+public sealed class AgentRowVm : ViewModelBase
+{
+    public required string Name { get; init; }
+    public required string Status { get; init; }
+    public required string Description { get; init; }
+}
+
+/// <summary>One selectable permission preset (mirrors ui-permission-presets PresetOption).</summary>
+public sealed class PresetOptionVm
+{
+    public required string Value { get; init; }
+    public required string Name { get; init; }
+    public string? Description { get; init; }
+    public override string ToString() => Name;
+}
+
 public sealed class FileEntryVm : ViewModelBase
 {
     private bool _isExpanded;
@@ -294,9 +383,9 @@ public sealed class ModelOptionVm
 public sealed class ChatViewModel : ViewModelBase
 {
     private bool _isRunning;
+    private bool _isCompacting;
     private string _title = "New Session";
     private string _cwd = "";
-    private string _usageText = "";
     private AssistantItem? _live;
     private ProcessGroupItem? _liveGroup;
     private readonly Dictionary<int, ToolItem> _liveTools = [];
@@ -304,17 +393,40 @@ public sealed class ChatViewModel : ViewModelBase
     public ObservableCollection<ChatItem> Items { get; } = [];
     public ObservableCollection<TodoVm> Todos { get; } = [];
 
-    public bool IsRunning { get => _isRunning; set { if (Set(ref _isRunning, value)) Raise(nameof(IsEmpty)); } }
+    public bool IsRunning { get => _isRunning; set { if (Set(ref _isRunning, value)) { Raise(nameof(IsEmpty)); if (!value) IsCompacting = false; } } }
+    /// <summary>A checkpoint summarization call is in flight — the run is busy, not frozen.</summary>
+    public bool IsCompacting { get => _isCompacting; set => Set(ref _isCompacting, value); }
     public string Title { get => _title; set => Set(ref _title, value); }
     public string Cwd { get => _cwd; set => Set(ref _cwd, value); }
-    public string UsageText { get => _usageText; set => Set(ref _usageText, value); }
     public bool HasTodos => Todos.Count > 0;
     public bool IsEmpty => Items.Count == 0 && _live is null;
+
+    /* ===== todo summary（输入区上方折叠为一行摘要，完整清单在右栏"任务"页） ===== */
+    private bool _isTodoExpanded;
+    /// <summary>对话区清单默认折叠；展开后限高内滚，长清单不再挤压对话区。</summary>
+    public bool IsTodoExpanded { get => _isTodoExpanded; set => Set(ref _isTodoExpanded, value); }
+    public int TodoDoneCount => Todos.Count(t => t.IsCompleted);
+    /// <summary>进度徽标，如 "3/8"。</summary>
+    public string TodoProgress => $"{TodoDoneCount}/{Todos.Count}";
+    /// <summary>当前进行中的任务；没有则取第一个待办；全部完成时为空。</summary>
+    public string CurrentTodoText =>
+        (Todos.FirstOrDefault(t => t.Status == "in_progress")
+         ?? Todos.FirstOrDefault(t => !t.IsCompleted))?.Content ?? "";
+    public bool HasCurrentTodo => CurrentTodoText.Length > 0;
+
+    private void RaiseTodoSummary()
+    {
+        Raise(nameof(HasTodos));
+        Raise(nameof(TodoDoneCount));
+        Raise(nameof(TodoProgress));
+        Raise(nameof(CurrentTodoText));
+        Raise(nameof(HasCurrentTodo));
+    }
 
     public ChatViewModel()
     {
         Items.CollectionChanged += (_, _) => Raise(nameof(IsEmpty));
-        Todos.CollectionChanged += (_, _) => Raise(nameof(HasTodos));
+        Todos.CollectionChanged += (_, _) => RaiseTodoSummary();
     }
 
     public void LoadSnapshot(IEnumerable<SessionEvent> events, bool running, string? title, string cwd)
@@ -328,6 +440,18 @@ public sealed class ChatViewModel : ViewModelBase
         Raise(nameof(Cwd));
         foreach (var evt in events) Fold(evt);
         IsRunning = running;
+        // 旧版本持久化的会话可能在结束后残留 in_progress（当时没有回合收尾机制）。
+        // 会话已不在运行，展示层把这些项收尾为 completed，避免任务清单永远显示“进行中”。
+        if (!running && Todos.Any(t => t.Status == "in_progress"))
+        {
+            var settled = Todos
+                .Select(t => t.Status == "in_progress"
+                    ? new TodoVm { Content = t.Content, Status = "completed" }
+                    : t)
+                .ToList();
+            Todos.Clear();
+            foreach (var todo in settled) Todos.Add(todo);
+        }
     }
 
     private ProcessGroupItem CurrentGroup()
@@ -366,6 +490,12 @@ public sealed class ChatViewModel : ViewModelBase
             }
             case SessionEventTypes.UserMessage:
             {
+                // System notices (plan-mode narration, approval-policy notice, goal
+                // continuation prompts) stay in the durable log for the MODEL, but the
+                // transcript renders only user-authored bubbles (mirrors harness: the
+                // conversation view filters non-user message sources).
+                if (data.TryGetProperty("source", out var src) && Session.IsNoticeSource(src.GetString()))
+                    break;
                 var text = data.TryGetProperty("text", out var t) ? t.GetString() ?? "" : "";
                 Items.Add(new UserItem { Text = text });
                 if (Title == "New Session" && text.Length > 0)
@@ -392,8 +522,6 @@ public sealed class ChatViewModel : ViewModelBase
                 var isReply = item.Blocks.Count > 0 && !(message?.Blocks ?? []).OfType<ToolUseBlock>().Any();
                 if (isReply) CurrentGroup().ReplyChildren.Add(item);
                 else if (item.Blocks.Count > 0) CurrentGroup().Children.Add(item);
-                if (message?.Usage is { } usage && usage.PromptTokens > 0)
-                    UsageText = $"ctx ~{(int)Math.Round(usage.PromptTokens / 1000.0)}k tokens";
                 break;
             }
             case SessionEventTypes.ToolCall:
@@ -490,10 +618,6 @@ public sealed class ChatViewModel : ViewModelBase
                 }
                 break;
             }
-            case UsageChunk usage:
-                if (usage.PromptTokens > 0)
-                    UsageText = $"ctx ~{(int)Math.Round(usage.PromptTokens / 1000.0)}k tokens";
-                break;
         }
     }
 
@@ -536,7 +660,6 @@ public sealed class MainViewModel : ViewModelBase
     private bool _isSidebarCollapsed;
     private bool _isRightbarOpen;
     private string? _selectedModel;
-    private string _providerMeta = "";
     private WorkspaceEntry? _selectedWorkspace;
     private string _sessionFilter = "";
     private bool _isSearchOpen;
@@ -548,14 +671,85 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<ToastVm> Toasts { get; } = [];
     public ObservableCollection<ModelOptionVm> Models { get; } = [];
 
+    // Feature panels
+    public GoalPanelVm Goal { get; } = new();
+
+    // Composer statistics dock (mirrors StatsPills + ContextMeter below the input card).
+    public ComposerStatsVm ComposerStats { get; } = new();
+    public ObservableCollection<TeamTaskRowVm> TeamTasks { get; } = [];
+    public ObservableCollection<ScheduleRowVm> Schedules { get; } = [];
+    public ObservableCollection<WorkflowRowVm> Workflows { get; } = [];
+    public ObservableCollection<JobRowVm> JobList { get; } = [];
+    public ObservableCollection<AgentRowVm> Agents { get; } = [];
+    public bool IsPlanActive { get => _isPlanActive; private set => Set(ref _isPlanActive, value); }
+    private bool _isPlanActive;
+    /// <summary>Effective target: a pending selection flips the logged state (harness
+    /// PlanChip renders `pending ? !active : active`, a folded host value, not optimism).</summary>
+    public bool IsPlanTargetActive { get => _isPlanTargetActive; private set => Set(ref _isPlanTargetActive, value); }
+    private bool _isPlanTargetActive;
+    /// <summary>A selection awaits the next accepted in-turn pre-step.</summary>
+    public bool IsPlanPending { get => _isPlanPending; private set => Set(ref _isPlanPending, value); }
+    private bool _isPlanPending;
+    public string PlanStatusText => IsPlanPending
+        ? (IsPlanTargetActive ? "计划模式：开启（下一步生效）" : "计划模式：关闭（下一步生效）")
+        : (IsPlanTargetActive ? "计划模式：开启" : "计划模式：关闭");
+    public bool IsTeamEnabled { get => _isTeamEnabled; private set => Set(ref _isTeamEnabled, value); }
+    private bool _isTeamEnabled;
+
+    // Pending plan review (mirrors PlanReviewPanel)
+    public string? PendingQuestionId
+    {
+        get => _pendingQuestionId;
+        private set { if (Set(ref _pendingQuestionId, value)) Raise(nameof(HasPendingReview)); }
+    }
+    private string? _pendingQuestionId;
+    public string? ReviewPlanText { get => _reviewPlanText; private set => Set(ref _reviewPlanText, value); }
+    private string? _reviewPlanText;
+    public string? ReviewQuestion { get => _reviewQuestion; private set => Set(ref _reviewQuestion, value); }
+    private string? _reviewQuestion;
+    public bool HasPendingReview => PendingQuestionId is not null;
+
+    // Pending sandbox escalation approval (mirrors ui-approval ApprovalPanel).
+    public string? PendingApprovalId
+    {
+        get => _pendingApprovalId;
+        private set { if (Set(ref _pendingApprovalId, value)) Raise(nameof(HasPendingApproval)); }
+    }
+    private string? _pendingApprovalId;
+    public string? ApprovalToolName { get => _approvalToolName; private set => Set(ref _approvalToolName, value); }
+    private string? _approvalToolName;
+    public string? ApprovalReason { get => _approvalReason; private set => Set(ref _approvalReason, value); }
+    private string? _approvalReason;
+    public bool HasPendingApproval => PendingApprovalId is not null;
+
+    // Permission preset selector (mirrors ui-permission-presets PermissionSelect).
+    public ObservableCollection<PresetOptionVm> PermissionOptions { get; } = [];
+    public string? SelectedPermission
+    {
+        get => _selectedPermission;
+        set
+        {
+            if (!Set(ref _selectedPermission, value)) return;
+            if (value is null || value == PermissionPresetService.CustomPreset) return;
+            var live = CurrentId is null ? null : _manager.Get(CurrentId);
+            if (live is null) return;
+            try { _manager.Permissions.SetForAgent(live.Agent, value); }
+            catch (HarnessError ex) { Toast(ex.Message, true); }
+            RefreshPermissionSelection();
+        }
+    }
+    private string? _selectedPermission;
+
     public HarnessSettings Settings => _settings.Current;
+
+    /// <summary>是否有任何对话正在运行（含后台/子代理会话）。设置页据此拦截数据目录修改。</summary>
+    public bool AnySessionRunning => _manager.AnySessionRunning;
 
     public ChatViewModel? CurrentChat { get => _currentChat; private set => Set(ref _currentChat, value); }
     public string? CurrentId { get => _currentId; private set => Set(ref _currentId, value); }
     public bool IsSidebarCollapsed { get => _isSidebarCollapsed; set => Set(ref _isSidebarCollapsed, value); }
     public bool IsRightbarOpen { get => _isRightbarOpen; set => Set(ref _isRightbarOpen, value); }
     public bool HasCurrentSession => CurrentId is not null;
-    public string ProviderMeta { get => _providerMeta; private set => Set(ref _providerMeta, value); }
     public WorkspaceEntry? SelectedWorkspace { get => _selectedWorkspace; private set => Set(ref _selectedWorkspace, value); }
     public bool IsSearchOpen { get => _isSearchOpen; set => Set(ref _isSearchOpen, value); }
 
@@ -589,10 +783,91 @@ public sealed class MainViewModel : ViewModelBase
         manager.SessionStreamBroadcast += (sid, chunk) => _dispatcher.BeginInvoke(() => OnSessionChunk(sid, chunk));
         manager.SessionRunningBroadcast += (sid, running) => _dispatcher.BeginInvoke(() => OnSessionRunning(sid, running));
 
+        // Plan review / approval requests raised by exit_plan_mode.
+        manager.Questions.QuestionRaised += (id, req) => _dispatcher.BeginInvoke(() =>
+        {
+            PendingQuestionId = id;
+            ReviewQuestion = req.Question;
+            ReviewPlanText = req.Detail ?? "";
+        });
+        manager.Questions.QuestionCleared += id => _dispatcher.BeginInvoke(() =>
+        {
+            if (PendingQuestionId == id) PendingQuestionId = null;
+        });
+
+        // Sandbox escalation approval requests (mirrors ui-approval ApprovalPanel wiring).
+        manager.ApprovalInbox.Raised += (id, req) => _dispatcher.BeginInvoke(() =>
+        {
+            PendingApprovalId = id;
+            ApprovalToolName = req.ToolName;
+            ApprovalReason = req.Reason ?? "";
+        });
+        manager.ApprovalInbox.Cleared += id => _dispatcher.BeginInvoke(() =>
+        {
+            if (PendingApprovalId == id) PendingApprovalId = null;
+        });
+
+        RefreshPermissionCatalog();
         RefreshWorkspaces();
         RefreshSessions();
         RefreshCatalog();
         UpdateProviderMeta();
+        ComposerStats.SetDetailed(settings.Current.PerformanceUsage != "compact");
+    }
+
+    /// <summary>Re-fold the composer statistics dock from the current session's durable log.</summary>
+    private void RefreshComposerStats()
+    {
+        if (CurrentId is null)
+        {
+            ComposerStats.Clear();
+            return;
+        }
+        var live = _manager.Get(CurrentId);
+        if (live is null)
+        {
+            ComposerStats.Clear();
+            return;
+        }
+        ComposerStats.SetDetailed(_settings.Current.PerformanceUsage != "compact");
+        ComposerStats.Refresh(live.Session, _settings.Current.ContextWindow);
+    }
+
+    /// <summary>Approve the pending escalation (the one-shot grant).</summary>
+    public void ApproveEscalation()
+    {
+        if (PendingApprovalId is { } id) _manager.ApprovalInbox.Answer(id, ApprovalOutcome.AllowedOnce);
+    }
+
+    /// <summary>Reject the pending escalation — the operation stays denied.</summary>
+    public void RejectEscalation()
+    {
+        if (PendingApprovalId is { } id) _manager.ApprovalInbox.Answer(id, ApprovalOutcome.Rejected);
+    }
+
+    private void RefreshPermissionCatalog()
+    {
+        PermissionOptions.Clear();
+        foreach (var option in _manager.Permissions.Catalog())
+            PermissionOptions.Add(new PresetOptionVm { Value = option.Value, Name = option.Name, Description = option.Description });
+        PermissionOptions.Add(new PresetOptionVm
+        {
+            Value = PermissionPresetService.CustomPreset,
+            Name = "自定义",
+            Description = "当前沙箱与审批设置不匹配任何预设。",
+        });
+    }
+
+    /// <summary>Re-derive the current session's preset without triggering a switch.</summary>
+    public void RefreshPermissionSelection()
+    {
+        var live = CurrentId is null ? null : _manager.Get(CurrentId);
+        var current = live is null ? null : _manager.Permissions.Current(live.Session);
+        if (_selectedPermission != current)
+        {
+            _selectedPermission = current;
+            Raise(nameof(SelectedPermission));
+        }
     }
 
     public void RefreshWorkspaces()
@@ -638,11 +913,38 @@ public sealed class MainViewModel : ViewModelBase
         {
             var message = evt.Data.TryGetProperty("message", out var m) ? m.GetString() : "Agent error";
             Toast(message ?? "Agent error", true);
+            // Keep the failure visible in the transcript too — a toast alone disappears
+            // and the user is left with a silently stopped conversation.
+            if (sid == CurrentId) CurrentChat?.Items.Add(new ErrorItem { Text = message ?? "Agent error" });
+            return;
+        }
+        if (evt.Type == "compaction/status")
+        {
+            var state = evt.Data.TryGetProperty("state", out var st) ? st.GetString() : null;
+            if (sid == CurrentId && CurrentChat is not null)
+                CurrentChat.IsCompacting = state == "running";
             return;
         }
         if (sid == CurrentId) CurrentChat?.Fold(evt);
         if (evt.Type is SessionEventTypes.Rename or SessionEventTypes.UserMessage or SessionEventTypes.TurnEnd)
             RefreshSessionsSoon();
+        // Feature state is folded from session events; refresh the panels when current session changes state.
+        if (sid == CurrentId && evt.Type is
+            SessionEventTypes.GoalChange or SessionEventTypes.PlanMode or SessionEventTypes.TeamTask or
+            SessionEventTypes.TeamMode or SessionEventTypes.WorkflowStart or SessionEventTypes.WorkflowEnd or
+            SessionEventTypes.WorkflowPhase or SessionEventTypes.JobRegistered or SessionEventTypes.JobSettled or
+            SessionEventTypes.SubagentCatalog or SessionEventTypes.SubagentStart or SessionEventTypes.SubagentEnd or
+            SessionEventTypes.PlanSubmitted or SessionEventTypes.TurnEnd)
+            RefreshFeatures();
+        // Permission knobs are durable session state; keep the selector in sync with the fold.
+        if (sid == CurrentId && evt.Type is
+            SessionEventTypes.PermissionPreset or SessionEventTypes.SandboxMode or SessionEventTypes.ApprovalPolicy)
+            RefreshPermissionSelection();
+        // Composer statistics fold from settled facts: assistant messages carry usage+timing,
+        // tool results complete the wall-time pairs. Refresh only on those (not every delta).
+        if (sid == CurrentId && evt.Type is
+            SessionEventTypes.AssistantMessage or SessionEventTypes.ToolResult or SessionEventTypes.RequestHeader)
+            RefreshComposerStats();
     }
 
     private void OnSessionChunk(string sid, StreamChunk chunk)
@@ -722,6 +1024,9 @@ public sealed class MainViewModel : ViewModelBase
         foreach (var row in Sessions.SelectMany(g => g.Children))
             row.IsActive = row.Id == id;
         LoadFileTree("");
+        RefreshFeatures();
+        RefreshPermissionSelection();
+        RefreshComposerStats();
     }
 
     public void NewSession() => NewSession(SelectedWorkspace?.Path);
@@ -764,6 +1069,17 @@ public sealed class MainViewModel : ViewModelBase
             Raise(nameof(HasCurrentSession));
             FileTree.Clear();
         }
+        RefreshSessions();
+    }
+
+    /// <summary>归档列表（含所有工作区，按更新时间倒序）。归档窗口用。</summary>
+    public IReadOnlyList<SessionSummary> ListArchivedSessions() =>
+        [.. _store.ListSessions(includeArchived: true).Where(s => s.Archived)];
+
+    /// <summary>取消归档：会话回到侧边栏原工作区分组。</summary>
+    public void UnarchiveSession(string id)
+    {
+        _store.ArchiveSession(id, false);
         RefreshSessions();
     }
 
@@ -810,10 +1126,12 @@ public sealed class MainViewModel : ViewModelBase
         App.ApplyTheme(_settings.Current.Theme);
         RefreshCatalog();
         UpdateProviderMeta();
+        // performanceUsage 切换立即生效（compact/detailed 重排统计胶囊）。
+        RefreshComposerStats();
     }
 
     private void UpdateProviderMeta() =>
-        ProviderMeta = $"{_settings.Current.Provider} · {_settings.Current.Model}";
+        ComposerStats.ProviderMeta = $"{_settings.Current.Provider} · {_settings.Current.Model}";
 
     public void RefreshCatalog()
     {
@@ -887,6 +1205,198 @@ public sealed class MainViewModel : ViewModelBase
                 },
             };
         }
+    }
+
+    /* ===== feature panels ===== */
+    public void RefreshFeatures()
+    {
+        if (CurrentId is null) return;
+        var live = _manager.Ensure(CurrentId);
+        var session = live.Session;
+
+        var goal = _manager.Goals.Get(session);
+        Goal.HasGoal = goal is not null;
+        if (goal is not null)
+        {
+            Goal.Objective = goal.Objective;
+            Goal.Phase = goal.Phase switch
+            {
+                MyAgent.Goal.GoalPhase.Active => "进行中",
+                MyAgent.Goal.GoalPhase.Paused => "已暂停",
+                MyAgent.Goal.GoalPhase.Blocked => "受阻",
+                MyAgent.Goal.GoalPhase.Complete => "已完成",
+                _ => "",
+            };
+            Goal.Progress = $"第 {goal.RoundsStarted}/{goal.MaxGoalRounds} 轮 · " +
+                            (goal.Activation == MyAgent.Goal.GoalActivation.Armed ? "自动续跑已就绪" : "待人工继续");
+        }
+
+        var plan = _manager.Plans.Get(session);
+        IsPlanActive = plan.Active;
+        IsPlanPending = plan.Pending;
+        IsPlanTargetActive = plan.Pending ? !plan.Active : plan.Active;
+        Raise(nameof(PlanStatusText));
+
+        TeamTasks.Clear();
+        foreach (var task in _manager.Teams.List(session, limit: 100))
+            TeamTasks.Add(new TeamTaskRowVm
+            {
+                Id = task.Task.Id,
+                Subject = task.Task.Subject,
+                Status = MyAgent.Team.TeamJson.StatusName(task.Task.Status),
+                Ready = task.Ready,
+                Owner = task.Task.OwnerName ?? "",
+            });
+
+        Schedules.Clear();
+        foreach (var s in _manager.Schedules.List(limit: 100))
+            Schedules.Add(new ScheduleRowVm
+            {
+                Id = s.Id,
+                Title = s.Title,
+                Kind = s.Kind,
+                Next = s.ScheduledAt.ToLocalTime().ToString("MM-dd HH:mm"),
+                Status = MyAgent.Schedule.ScheduleJson.StatusName(s.Status),
+            });
+
+        IsTeamEnabled = _manager.Teams.IsEnabled(session);
+
+        JobList.Clear();
+        foreach (var job in _manager.Jobs.List(CurrentId))
+            JobList.Add(new JobRowVm
+            {
+                Id = job.Id, Label = job.Label, Status = job.Status, OutputBytes = job.OutputTotal,
+            });
+
+        Agents.Clear();
+        Agents.Add(new AgentRowVm { Name = "lead", Status = "root", Description = "根代理" });
+        foreach (var member in _manager.Subagents.ListDescendants(session))
+        {
+            var act = _manager.Subagents.Find(member.ChildId);
+            Agents.Add(new AgentRowVm
+            {
+                Name = member.Name, Status = act?.Status ?? "inactive", Description = member.Label,
+            });
+        }
+
+        Workflows.Clear();
+        var wfEvents = session.Events.ToList();
+        foreach (var evt in wfEvents.Where(e => e.Type == SessionEventTypes.WorkflowEnd).TakeLast(20).Reverse())
+        {
+            var runId = evt.Data.TryGetProperty("runId", out var rid) ? rid.GetString() ?? "" : "";
+            var stop = evt.Data.TryGetProperty("stopReason", out var sr) ? sr.GetString() ?? "" : "";
+            var agents = evt.Data.TryGetProperty("agentsStarted", out var ag) && ag.ValueKind == JsonValueKind.Number
+                ? ag.GetInt32() : 0;
+            var name = runId;
+            foreach (var start in wfEvents.Where(e => e.Type == SessionEventTypes.WorkflowStart))
+            {
+                if (!start.Data.TryGetProperty("runId", out var r) || r.GetString() != runId) continue;
+                if (start.Data.TryGetProperty("name", out var nm)) name = nm.GetString() ?? runId;
+                break;
+            }
+            var phases = wfEvents.Where(e => e.Type == SessionEventTypes.WorkflowPhase)
+                .Select(e => e.Data.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "")
+                .Where(s => s.Length > 0).ToList();
+            Workflows.Add(new WorkflowRowVm
+            {
+                RunId = runId, Name = name, StopReason = stop, AgentsStarted = agents,
+                Phases = phases, AgentCount = wfEvents.Count(e => e.Type == SessionEventTypes.WorkflowAgentStart),
+            });
+        }
+    }
+
+    public void TogglePlanMode()
+    {
+        if (CurrentId is null) return;
+        var live = _manager.Ensure(CurrentId);
+        var session = live.Session;
+        // Toggle the EFFECTIVE target (a pending selection flips back), mirroring the
+        // harness chip/control. Between turns the change commits immediately — the old
+        // Select()-only path left the UI state frozen until a turn that might never run.
+        var wanted = !IsPlanTargetActive;
+        var outcome = _manager.Plans.SetSelected(session, wanted, live.Agent.IsRunning);
+        if (outcome == MyAgent.Plan.PlanSelectionOutcome.Committed)
+            live.Agent.Inject(wanted
+                ? "The user switched this session to plan mode."
+                : "The user switched this session back to the default mode.");
+        RefreshFeatures();
+        Toast(outcome switch
+        {
+            MyAgent.Plan.PlanSelectionOutcome.Committed => wanted ? "计划模式已开启" : "计划模式已关闭",
+            MyAgent.Plan.PlanSelectionOutcome.Queued => wanted
+                ? "正在进入计划模式（下一步生效）"
+                : "正在退出计划模式（下一步生效）",
+            MyAgent.Plan.PlanSelectionOutcome.Cancelled => "已取消待生效的计划模式切换",
+            _ => wanted ? "计划模式已开启" : "计划模式已关闭",
+        }, false);
+    }
+
+    /// <summary>The plan chip is an exit control (mirrors ui-plan PlanChip: click = /plan off).</summary>
+    public void ExitPlanMode()
+    {
+        if (CurrentId is null || !IsPlanTargetActive) return;
+        TogglePlanMode();
+    }
+
+    public void ToggleTeamMode()
+    {
+        if (CurrentId is null) return;
+        var session = _manager.Ensure(CurrentId).Session;
+        _manager.Teams.SetMode(session, !_manager.Teams.IsEnabled(session));
+        RefreshFeatures();
+        Toast(_manager.Teams.IsEnabled(session) ? "团队模式已开启" : "团队模式已关闭（任务保留）", false);
+    }
+
+    // ---- GoalBar actions (mirrors ui-goal GoalBar: edit / pause / resume / clear) ----
+    public void GoalEdit(string objective)
+    {
+        if (CurrentId is null) return;
+        var session = _manager.Ensure(CurrentId).Session;
+        var goal = _manager.Goals.Get(session);
+        if (goal is null) return;
+        try { _manager.Goals.Edit(session, goal.Id, goal.Revision, objective: objective); }
+        catch (Exception ex) { Toast(ex.Message, true); }
+        RefreshFeatures();
+    }
+
+    public void GoalPauseResume()
+    {
+        if (CurrentId is null) return;
+        var session = _manager.Ensure(CurrentId).Session;
+        var goal = _manager.Goals.Get(session);
+        if (goal is null) return;
+        try
+        {
+            if (goal.Phase == MyAgent.Goal.GoalPhase.Active)
+                _manager.Goals.Pause(session, goal.Id, goal.Revision);
+            else
+                _manager.Goals.Resume(session, goal.Id, goal.Revision);
+        }
+        catch (Exception ex) { Toast(ex.Message, true); }
+        RefreshFeatures();
+    }
+
+    public void GoalClear()
+    {
+        if (CurrentId is null) return;
+        _manager.Goals.Clear(_manager.Ensure(CurrentId).Session);
+        RefreshFeatures();
+    }
+
+    // ---- Plan review panel actions (mirrors PlanReviewPanel: approve / discuss) ----
+    public void ApprovePlan()
+    {
+        if (PendingQuestionId is null) return;
+        _manager.Questions.Answer(PendingQuestionId, MyAgent.Plan.ExitPlanModeTool.ApproveLabel);
+        RefreshFeatures();
+    }
+
+    public void DiscussPlan()
+    {
+        if (PendingQuestionId is null) return;
+        _manager.Questions.Dismiss(PendingQuestionId);
+        PendingQuestionId = null;
+        RefreshFeatures();
     }
 
     /* ===== toast ===== */

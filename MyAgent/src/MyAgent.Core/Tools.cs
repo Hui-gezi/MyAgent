@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace MyAgent.Core;
 
@@ -12,6 +12,9 @@ public sealed class ToolContext(Session session, string cwd)
 {
     public Session Session { get; } = session;
     public string Cwd { get; } = cwd;
+
+    /// <summary>The exact tool call being executed (approval prompts attach to it). Set by the batch runner.</summary>
+    public string? CallId { get; internal set; }
 }
 
 public interface ITool
@@ -95,7 +98,9 @@ public static class ToolBatch
             return ToolResult.Error($"Unknown tool '{call.Name}'.", "unknown_tool");
         try
         {
-            return await tool.ExecuteAsync(call.Input, context, cancellationToken);
+            // Per-call context: parallel calls must not share a mutable CallId.
+            var callContext = new ToolContext(context.Session, context.Cwd) { CallId = call.Id };
+            return await tool.ExecuteAsync(call.Input, callContext, cancellationToken);
         }
         catch (OperationCanceledException)
         {

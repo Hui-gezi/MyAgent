@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyAgent.Core\MyAgent.Core.csproj" />
+    <ProjectReference Include="..\MyAgent.Sandbox\MyAgent.Sandbox.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

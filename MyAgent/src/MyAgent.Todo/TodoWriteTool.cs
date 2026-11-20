@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using MyAgent.Core;
 
 namespace MyAgent.Todo;
@@ -10,7 +10,9 @@ public sealed class TodoWriteTool : ITool
     public string Name => "todo_write";
     public string Description =>
         "Create or update the session task list. Pass the complete list every time; it replaces the previous list. " +
-        "Each item has content and status (pending, in_progress, completed). Keep exactly one item in_progress while working.";
+        "Each item has content and status (pending, in_progress, completed). Keep exactly one item in_progress while working. " +
+        "Mark items completed immediately after finishing them; never leave an item in_progress once its work is done. " +
+        "Before your final reply, call todo_write once more so every finished item is completed and nothing is left in_progress.";
     public JsonElement InputSchema => JsonDocument.Parse("""
         {
           "type": "object",

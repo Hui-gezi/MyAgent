@@ -9,6 +9,12 @@ public sealed class SystemPromptAssembler : ISystemPromptAssembler
     private const int MaxInstructionsBytes = 32 * 1024;
     private static readonly string[] InstructionFiles = ["AGENTS.md", "CLAUDE.md"];
 
+    /// <summary>
+    /// Optional dynamic sections (e.g. plan-mode policy) appended before instruction files.
+    /// The host wires this so context stays decoupled from specific feature projects.
+    /// </summary>
+    public Func<Session, IEnumerable<string>>? DynamicSections { get; set; }
+
     public string Assemble(Session session, IReadOnlyList<ITool> tools)
     {
         var prompt = new StringBuilder();
@@ -26,6 +32,17 @@ public sealed class SystemPromptAssembler : ISystemPromptAssembler
             prompt.AppendLine();
             foreach (var section in sections)
                 prompt.AppendLine(section);
+        }
+
+        if (DynamicSections is not null)
+        {
+            var dynamic = DynamicSections(session).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+            if (dynamic.Count > 0)
+            {
+                prompt.AppendLine();
+                foreach (var section in dynamic)
+                    prompt.AppendLine(section);
+            }
         }
 
         foreach (var file in InstructionFiles)

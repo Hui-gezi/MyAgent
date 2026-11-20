@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using MyAgent.Core;
@@ -67,9 +67,18 @@ public sealed class OpenAiCompatProvider(OpenAiCompatOptions options, HttpClient
 
         if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
         {
-            yield return new UsageChunk(
-                usage.TryGetProperty("prompt_tokens", out var p) ? p.GetInt32() : 0,
-                usage.TryGetProperty("completion_tokens", out var c) ? c.GetInt32() : 0);
+            // OpenAI: prompt_tokens is the aggregate; cached part rides
+            // prompt_tokens_details.cached_tokens. DeepSeek: prompt_cache_hit_tokens /
+            // prompt_cache_miss_tokens are the disjoint buckets (hit ⊂ prompt_tokens).
+            var prompt = usage.TryGetProperty("prompt_tokens", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : 0;
+            var completion = usage.TryGetProperty("completion_tokens", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetInt32() : 0;
+            var cacheRead = 0;
+            if (usage.TryGetProperty("prompt_tokens_details", out var details) && details.ValueKind == JsonValueKind.Object &&
+                details.TryGetProperty("cached_tokens", out var cached) && cached.ValueKind == JsonValueKind.Number)
+                cacheRead = cached.GetInt32();
+            else if (usage.TryGetProperty("prompt_cache_hit_tokens", out var hit) && hit.ValueKind == JsonValueKind.Number)
+                cacheRead = hit.GetInt32();
+            yield return new UsageChunk(prompt, completion, cacheRead, 0);
         }
 
         if (!root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
@@ -132,6 +141,14 @@ public sealed class OpenAiCompatProvider(OpenAiCompatOptions options, HttpClient
             writer.WriteStartObject();
             writer.WriteString("model", request.Model);
             writer.WriteBoolean("stream", true);
+            // OpenAI 兼容协议流式默认不回 usage，必须显式要；否则整条链路没有
+            // token 用量（用量胶囊/缓存命中/上下文占用全部无数据）。DeepSeek 官方
+            // API 忽略此字段也照常带 usage，兼容两端。末尾 usage-only chunk 的
+            // choices 为空数组，TranslateEvent 已按"先 usage 后 choices"处理。
+            writer.WritePropertyName("stream_options");
+            writer.WriteStartObject();
+            writer.WriteBoolean("include_usage", true);
+            writer.WriteEndObject();
             writer.WriteNumber("max_tokens", Math.Min(request.MaxTokens, 8192));
             writer.WriteBoolean("enable_thinking", options.Thinking);
             if (options.Thinking) writer.WriteString("reasoning_effort", options.Effort);

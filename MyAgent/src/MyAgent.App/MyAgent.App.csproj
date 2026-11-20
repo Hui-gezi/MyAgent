@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\MyAgent.Core\MyAgent.Core.csproj" />
@@ -9,6 +9,16 @@
     <ProjectReference Include="..\MyAgent.Todo\MyAgent.Todo.csproj" />
     <ProjectReference Include="..\MyAgent.Context\MyAgent.Context.csproj" />
     <ProjectReference Include="..\MyAgent.Compaction\MyAgent.Compaction.csproj" />
+    <ProjectReference Include="..\MyAgent.Goal\MyAgent.Goal.csproj" />
+    <ProjectReference Include="..\MyAgent.Plan\MyAgent.Plan.csproj" />
+    <ProjectReference Include="..\MyAgent.Team\MyAgent.Team.csproj" />
+    <ProjectReference Include="..\MyAgent.Workflow\MyAgent.Workflow.csproj" />
+    <ProjectReference Include="..\MyAgent.Schedule\MyAgent.Schedule.csproj" />
+    <ProjectReference Include="..\MyAgent.Subagents\MyAgent.Subagents.csproj" />
+    <ProjectReference Include="..\MyAgent.Jobs\MyAgent.Jobs.csproj" />
+    <ProjectReference Include="..\MyAgent.Sandbox\MyAgent.Sandbox.csproj" />
+    <ProjectReference Include="..\MyAgent.Approval\MyAgent.Approval.csproj" />
+    <ProjectReference Include="..\MyAgent.Permissions\MyAgent.Permissions.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

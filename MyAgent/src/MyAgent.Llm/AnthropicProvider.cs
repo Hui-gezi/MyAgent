@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using MyAgent.Core;
@@ -78,7 +78,13 @@ public sealed class AnthropicProvider(AnthropicOptions options, HttpClient? http
                 if (root.TryGetProperty("message", out var message) &&
                     message.TryGetProperty("usage", out var startUsage) &&
                     startUsage.TryGetProperty("input_tokens", out var inputTokens))
-                    yield return new UsageChunk(inputTokens.GetInt32(), 0);
+                {
+                    // Anthropic reports the three prompt buckets DISJOINTLY: input_tokens is
+                    // the uncached part; total billed input = uncached + cache read + cache write.
+                    var cacheRead = startUsage.TryGetProperty("cache_read_input_tokens", out var cr) && cr.ValueKind == JsonValueKind.Number ? cr.GetInt32() : 0;
+                    var cacheWrite = startUsage.TryGetProperty("cache_creation_input_tokens", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt32() : 0;
+                    yield return new UsageChunk(inputTokens.GetInt32() + cacheRead + cacheWrite, 0, cacheRead, cacheWrite);
+                }
                 break;
 
             case "content_block_start":

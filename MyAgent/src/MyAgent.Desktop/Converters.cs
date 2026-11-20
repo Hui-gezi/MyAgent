@@ -39,6 +39,27 @@ public sealed class MarkdownConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+public sealed class JoinTextConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+        value is IEnumerable<string> items ? string.Join(" · ", items) : "";
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+public sealed class BoolToTextConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var parts = (parameter as string)?.Split('|') ?? ["True", "False"];
+        return value is true ? parts[0] : parts.Length > 1 ? parts[1] : parts[0];
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 public sealed class NotNullToVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>

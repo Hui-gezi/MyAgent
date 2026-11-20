@@ -1,6 +1,7 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using MyAgent.Core;
+using MyAgent.Sandbox;
 
 namespace MyAgent.Fs;
 
@@ -94,11 +95,14 @@ public sealed class ReadTool : ITool
 
 public sealed class WriteTool : ITool
 {
-    public string Name => "write";
-    public string Description =>
-        "Write a file to the filesystem, creating parent directories as needed. " +
-        "Overwrites the file if it already exists. Prefer edit for modifying existing files.";
-    public JsonElement InputSchema => FsSchema.Parse("""
+    private readonly ToolSandbox? _sandbox;
+    private readonly JsonElement _schema;
+
+    /// <summary>Without a ToolSandbox the tool writes unconfined (danger-full-access composition).</summary>
+    public WriteTool(ToolSandbox? sandbox = null)
+    {
+        _sandbox = sandbox;
+        var baseSchema = FsSchema.Parse("""
         {
           "type": "object",
           "properties": {
@@ -108,6 +112,14 @@ public sealed class WriteTool : ITool
           "required": ["file_path", "content"]
         }
         """);
+        _schema = sandbox?.AddEscalationFields(baseSchema, "operation") ?? baseSchema;
+    }
+
+    public string Name => "write";
+    public string Description =>
+        "Write a file to the filesystem, creating parent directories as needed. " +
+        "Overwrites the file if it already exists. Prefer edit for modifying existing files.";
+    public JsonElement InputSchema => _schema;
     public string PromptSection => "Prefer edit over write when changing part of an existing file.";
     public int PromptOrder => 1110;
 
@@ -115,6 +127,22 @@ public sealed class WriteTool : ITool
     {
         var path = FsSchema.ResolvePath(context, FsSchema.GetString(args, "file_path"));
         var content = FsSchema.GetString(args, "content");
+
+        // Resolve the per-call policy (an approved escalation is a wider one-shot grant),
+        // then fence the target BEFORE touching the filesystem.
+        if (_sandbox is not null)
+        {
+            var policy = await _sandbox.ResolvePolicyAsync(Name, args, context, cancellationToken);
+            try
+            {
+                FsFence.EnsureWritable(policy, path);
+            }
+            catch (HarnessError ex) when (ex.Code == SandboxErrorCodes.FsDenied)
+            {
+                return _sandbox.MapFsDenial(policy);
+            }
+        }
+
         var existed = File.Exists(path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content, Encoding.UTF8, cancellationToken);
@@ -125,11 +153,14 @@ public sealed class WriteTool : ITool
 
 public sealed class EditTool : ITool
 {
-    public string Name => "edit";
-    public string Description =>
-        "Replace old_string with new_string in a file. Without replace_all, old_string must match exactly once; " +
-        "include enough surrounding context to make the match unique. Preserves the rest of the file unchanged.";
-    public JsonElement InputSchema => FsSchema.Parse("""
+    private readonly ToolSandbox? _sandbox;
+    private readonly JsonElement _schema;
+
+    /// <summary>Without a ToolSandbox the tool edits unconfined (danger-full-access composition).</summary>
+    public EditTool(ToolSandbox? sandbox = null)
+    {
+        _sandbox = sandbox;
+        var baseSchema = FsSchema.Parse("""
         {
           "type": "object",
           "properties": {
@@ -141,6 +172,14 @@ public sealed class EditTool : ITool
           "required": ["file_path", "old_string", "new_string"]
         }
         """);
+        _schema = sandbox?.AddEscalationFields(baseSchema, "operation") ?? baseSchema;
+    }
+
+    public string Name => "edit";
+    public string Description =>
+        "Replace old_string with new_string in a file. Without replace_all, old_string must match exactly once; " +
+        "include enough surrounding context to make the match unique. Preserves the rest of the file unchanged.";
+    public JsonElement InputSchema => _schema;
     public string PromptSection => "edit requires a unique old_string match unless replace_all is set; add surrounding context to disambiguate.";
     public int PromptOrder => 1120;
 
@@ -157,6 +196,21 @@ public sealed class EditTool : ITool
             return ToolResult.Error("old_string must not be empty.", "invalid_args");
         if (oldString == newString)
             return ToolResult.Error("old_string and new_string are identical; nothing to change.", "invalid_args");
+
+        // Resolve the per-call policy (an approved escalation is a wider one-shot grant),
+        // then fence the target BEFORE touching the filesystem.
+        if (_sandbox is not null)
+        {
+            var policy = await _sandbox.ResolvePolicyAsync(Name, args, context, cancellationToken);
+            try
+            {
+                FsFence.EnsureWritable(policy, path);
+            }
+            catch (HarnessError ex) when (ex.Code == SandboxErrorCodes.FsDenied)
+            {
+                return _sandbox.MapFsDenial(policy);
+            }
+        }
 
         var content = await File.ReadAllTextAsync(path, Encoding.UTF8, cancellationToken);
         var occurrences = CountOccurrences(content, oldString);

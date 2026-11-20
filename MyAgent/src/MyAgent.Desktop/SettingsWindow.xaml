@@ -1,4 +1,4 @@
-<Window x:Class="MyAgent.Desktop.SettingsWindow"
+﻿<Window x:Class="MyAgent.Desktop.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="设置" Width="640" Height="540"
@@ -14,6 +14,36 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
+
+        <!-- 左侧导航项：选中态由 Tag="selected" 驱动（点击处理里切换），
+             背景/前景色随选中态与悬停即时更新，不再写死在各自模板里。 -->
+        <Style x:Key="SettingsNavItem" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgLayer2}" />
+                            </Trigger>
+                            <Trigger Property="Tag" Value="selected">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgLayer2}" />
+                                <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     <Border CornerRadius="28" Background="{DynamicResource MenuSurface}"
             BorderBrush="{DynamicResource BorderL2}" BorderThickness="1" Margin="16">
@@ -23,8 +53,7 @@
         <DockPanel>
             <DockPanel DockPanel.Dock="Top" Margin="24,18,24,12">
                 <Button x:Name="CloseBtn" DockPanel.Dock="Right" Content="✕" FontSize="14"
-                        Foreground="{DynamicResource TextSecondary}" Background="Transparent"
-                        BorderThickness="0" Cursor="Hand" Click="Cancel_Click" />
+                        Style="{StaticResource IconButton}" Click="Cancel_Click" />
                 <TextBlock Text="设置" FontSize="16" FontWeight="SemiBold" />
             </DockPanel>
             <DockPanel DockPanel.Dock="Bottom" Margin="24,12,24,18" LastChildFill="False">
@@ -55,26 +84,16 @@
             <DockPanel>
                 <Border DockPanel.Dock="Left" Width="160" BorderBrush="{DynamicResource BorderL1}" BorderThickness="0,0,1,0" Padding="8">
                     <StackPanel>
-                        <Button x:Name="NavModel" Content="模型服务" Padding="12,8" Click="NavModel_Click" Cursor="Hand"
-                                HorizontalContentAlignment="Left" FontSize="13">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border x:Name="Bd" Background="{DynamicResource BgLayer2}" CornerRadius="8" Padding="{TemplateBinding Padding}">
-                                        <ContentPresenter />
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
-                        <Button x:Name="NavAppearance" Content="外观" Padding="12,8" Margin="0,4,0,0" Click="NavAppearance_Click" Cursor="Hand"
-                                HorizontalContentAlignment="Left" FontSize="13" Foreground="{DynamicResource TextSecondary}">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
-                                        <ContentPresenter />
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                        <Button x:Name="NavModel" Content="模型服务" Style="{StaticResource SettingsNavItem}"
+                                Tag="selected" Click="NavModel_Click" />
+                        <Button x:Name="NavAppearance" Content="外观" Style="{StaticResource SettingsNavItem}"
+                                Margin="0,4,0,0" Click="NavAppearance_Click" />
+                        <Button x:Name="NavPermission" Content="权限与沙箱" Style="{StaticResource SettingsNavItem}"
+                                Margin="0,4,0,0" Click="NavPermission_Click" />
+                        <Button x:Name="NavData" Content="数据" Style="{StaticResource SettingsNavItem}"
+                                Margin="0,4,0,0" Click="NavData_Click" />
+                        <Button x:Name="NavArchive" Content="归档会话" Style="{StaticResource SettingsNavItem}"
+                                Margin="0,4,0,0" Click="NavArchive_Click" />
                     </StackPanel>
                 </Border>
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16,24,24">
@@ -87,7 +106,31 @@
                                 <ComboBoxItem Content="OpenAI 兼容" Tag="openai-compat" />
                             </ComboBox>
                             <TextBlock Text="API Key" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
-                            <PasswordBox x:Name="ApiKeyBox" FontSize="13" Padding="10,8" />
+                            <DockPanel>
+                                <Button x:Name="ToggleApiKeyBtn" DockPanel.Dock="Right" Content="显示"
+                                        Margin="8,0,0,0" Padding="12,8" FontSize="12.5" Click="ToggleApiKey_Click"
+                                        Cursor="Hand" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Stretch"
+                                        ToolTip="切换显示/隐藏 API Key">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="Bd" Background="{DynamicResource BgLayer1}"
+                                                    BorderBrush="{DynamicResource BorderL2}" BorderThickness="1"
+                                                    CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Grid>
+                                    <PasswordBox x:Name="ApiKeyBox" FontSize="13" Padding="10,8" />
+                                    <TextBox x:Name="ApiKeyPlainBox" FontSize="13" Padding="10,8" Visibility="Collapsed" />
+                                </Grid>
+                            </DockPanel>
                             <TextBlock Text="留空则读取环境变量 MYAGENT_API_KEY" FontSize="11.5" Foreground="{DynamicResource TextTertiary}" Margin="0,4,0,0" />
                             <TextBlock Text="Base URL" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
                             <TextBox x:Name="BaseUrlBox" FontSize="13" Padding="10,8" />
@@ -119,6 +162,10 @@
                             <TextBlock x:Name="ModelListStatus" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,0"
                                        Foreground="{DynamicResource TextTertiary}" />
                             <CheckBox x:Name="ThinkingBox" Content="启用思考（thinking）" FontSize="13" Margin="0,16,0,0" />
+                            <TextBlock Text="上下文窗口（tokens）" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
+                            <TextBox x:Name="ContextWindowBox" FontSize="13" Padding="10,8" />
+                            <TextBlock Text="所配置模型的真实上下文窗口，例如 131072（128K）或 1048576（1M）。填得过大会导致服务端先报上下文超限、本地压缩来不及触发。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" Margin="0,4,0,0" TextWrapping="Wrap" />
                             <TextBlock Text="推理强度" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
                             <ComboBox x:Name="EffortBox" FontSize="13" Padding="10,8">
                                 <ComboBoxItem Content="low" />
@@ -135,6 +182,134 @@
                             </ComboBox>
                             <TextBlock Text="界面配色随主题切换即时生效。" FontSize="11.5"
                                        Foreground="{DynamicResource TextTertiary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="性能与用量" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
+                            <ComboBox x:Name="PerformanceUsageBox" FontSize="13" Padding="10,8">
+                                <ComboBoxItem Content="详细（计数 + 用量 + 点击详情）" Tag="detailed" />
+                                <ComboBoxItem Content="简洁（仅速度与缓存命中）" Tag="compact" />
+                            </ComboBox>
+                            <TextBlock Text="选择性能与用量信息展示的详细程度（输入框下方的统计胶囊）。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="发送消息快捷键" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
+                            <ComboBox x:Name="SendKeyBox" FontSize="13" Padding="10,8">
+                                <ComboBoxItem Content="Enter 发送（Shift+Enter 换行）" Tag="enter" />
+                                <ComboBoxItem Content="Ctrl+Enter 发送（Enter 换行）" Tag="ctrl-enter" />
+                                <ComboBoxItem Content="Alt+Enter 发送（Enter 换行）" Tag="alt-enter" />
+                            </ComboBox>
+                            <TextBlock Text="选择输入框中发送消息的组合键；未选为发送键时，回车直接换行。保存后立即生效。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel x:Name="PermissionPanel" Visibility="Collapsed">
+                            <TextBlock Text="新会话默认权限" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <ComboBox x:Name="PermissionPresetBox" FontSize="13" Padding="10,8">
+                                <ComboBoxItem Content="workspace-write（工作区可写 + 需审批）" Tag="workspace-write" />
+                                <ComboBoxItem Content="danger-full-access（完全访问 + 免审批）" Tag="danger-full-access" />
+                            </ComboBox>
+                            <TextBlock Text="新建会话时钉入的预设；已有会话保留各自的持久权限设置。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="沙箱默认模式" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
+                            <ComboBox x:Name="SandboxModeBox" FontSize="13" Padding="10,8">
+                                <ComboBoxItem Content="read-only（只读）" Tag="read-only" />
+                                <ComboBoxItem Content="workspace-write（工作区可写）" Tag="workspace-write" />
+                                <ComboBoxItem Content="danger-full-access（完全访问）" Tag="danger-full-access" />
+                            </ComboBox>
+                            <TextBlock Text="会话未显式切换时的文件沙箱模式。Windows 上通过受限令牌（ACL）约束子进程写入。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="额外可写目录（每行一个绝对路径）" FontSize="12.5" FontWeight="SemiBold" Margin="0,16,0,6" />
+                            <TextBox x:Name="SandboxRootsBox" FontSize="13" Padding="10,8" AcceptsReturn="True"
+                                     TextWrapping="NoWrap" Height="72" VerticalScrollBarVisibility="Auto" />
+                            <TextBlock Text="workspace-write 额外允许写入的目录。Windows 上仅对文件工具生效，不约束沙箱进程。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel x:Name="DataPanel" Visibility="Collapsed">
+                            <TextBlock Text="数据目录" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <DockPanel>
+                                <Button x:Name="OpenDataHomeBtn" DockPanel.Dock="Right" Content="打开"
+                                        Margin="8,0,0,0" Padding="12,8" FontSize="12.5" Click="OpenDataHome_Click"
+                                        Cursor="Hand" Foreground="{DynamicResource TextPrimary}" ToolTip="在资源管理器中打开数据目录">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{DynamicResource BgLayer1}" BorderBrush="{DynamicResource BorderL2}"
+                                                    BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Border Background="{DynamicResource BgLayer1}" BorderBrush="{DynamicResource BorderL2}"
+                                        BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                    <TextBlock x:Name="DataHomeText" FontSize="12.5" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                            </DockPanel>
+                            <TextBlock x:Name="DataHomeSourceText" FontSize="11.5" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Foreground="{DynamicResource TextTertiary}" />
+                            <TextBlock Text="会话、定时任务与日志都会存到这里；设置文件（settings.json）始终保留在默认配置目录，不随此项移动。更改后重启应用生效，启动时会自动把现有数据迁移到新目录（旧目录文件保留）。有对话正在运行时无法更改，需等所有对话结束。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <Button x:Name="ChangeDataHomeBtn" Content="更改目录…" Padding="14,7" Click="ChangeDataHome_Click" Cursor="Hand"
+                                        Foreground="{DynamicResource TextPrimary}">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{DynamicResource BgLayer1}" BorderBrush="{DynamicResource BorderL2}"
+                                                    BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter HorizontalAlignment="Center" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Button x:Name="ResetDataHomeBtn" Content="恢复默认" Padding="14,7" Margin="8,0,0,0"
+                                        Click="ResetDataHome_Click" Cursor="Hand" Foreground="{DynamicResource TextSecondary}"
+                                        Background="Transparent" BorderThickness="0" FontSize="12.5" />
+                            </StackPanel>
+                            <TextBlock x:Name="DataHomeStatus" FontSize="11.5" TextWrapping="Wrap" Margin="0,10,0,0"
+                                       Foreground="{DynamicResource TextTertiary}" />
+                        </StackPanel>
+                        <StackPanel x:Name="ArchivePanel" Visibility="Collapsed">
+                            <TextBlock Text="归档会话" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <TextBlock Text="归档的会话不会显示在侧边栏，但数据仍保留在数据目录中。恢复后会话回到侧边栏原工作区分组；删除不可恢复。" FontSize="11.5"
+                                       Foreground="{DynamicResource TextTertiary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                            <TextBlock x:Name="ArchiveCountText" FontSize="11.5" Margin="0,0,0,8"
+                                       Foreground="{DynamicResource TextTertiary}" />
+                            <TextBlock x:Name="ArchiveEmptyText" Text="暂无归档会话" FontSize="13" Margin="0,16,0,16"
+                                       Foreground="{DynamicResource TextTertiary}" HorizontalAlignment="Center" />
+                            <ItemsControl x:Name="ArchiveList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource BgLayer1}" BorderBrush="{DynamicResource BorderL1}"
+                                                BorderThickness="1" CornerRadius="10" Padding="12,8" Margin="0,0,0,8">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="删除" Padding="10,5" Margin="6,0,0,0"
+                                                        Click="ArchiveDelete_Click" Cursor="Hand" FontSize="12"
+                                                        Foreground="{DynamicResource Danger}" Background="Transparent" BorderThickness="0"
+                                                        VerticalAlignment="Center" />
+                                                <Button DockPanel.Dock="Right" Content="恢复" Padding="12,5"
+                                                        Click="ArchiveRestore_Click" Cursor="Hand" FontSize="12"
+                                                        VerticalAlignment="Center">
+                                                    <Button.Template>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border Background="{DynamicResource BrandPrimary}" CornerRadius="8"
+                                                                    Padding="{TemplateBinding Padding}">
+                                                                <ContentPresenter HorizontalAlignment="Center" />
+                                                            </Border>
+                                                        </ControlTemplate>
+                                                    </Button.Template>
+                                                    <Button.Foreground>
+                                                        <DynamicResource ResourceKey="BrandPrimaryText" />
+                                                    </Button.Foreground>
+                                                </Button>
+                                                <StackPanel Margin="0,0,10,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="Medium"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock FontSize="11.5" Foreground="{DynamicResource TextTertiary}"
+                                                               TextTrimming="CharacterEllipsis">
+                                                        <Run Text="{Binding UpdatedText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Cwd, Mode=OneWay}" />
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
